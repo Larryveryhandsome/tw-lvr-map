@@ -103,8 +103,9 @@
   function toCSV(list) {
     const cell = v => {
       const s = String(v == null ? '' : v);
-      const safe = /^[=+\-@]/.test(s) ? "'" + s : s;
-      return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+      // 只有「文字」才防公式注入（= + - @ 與 Tab、CR 開頭）；數字（例如地下一層的 -1）維持數字，不加單引號
+      const safe = typeof v === 'string' && /^[=+\-@\t\r]/.test(s) ? "'" + s : s;
+      return /[",\n\r\t]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
     };
     return '﻿' + [COLUMNS.map(c => c[1]).join(',')]
       .concat(list.map(t => COLUMNS.map(c => cell(t[c[0]])).join(','))).join('\r\n');

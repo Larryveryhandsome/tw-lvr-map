@@ -9,6 +9,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (v, d) => v == null ? '—' : Number(v).toLocaleString('zh-TW', { maximumFractionDigits: d == null ? 2 : d });
   const COLORS = ['#9aa5ad', '#2c7bb6', '#7fbf7b', '#fdae61', '#d7191c'];
+  const MAX_MARKERS = 5000;   // 地圖最多畫幾個點（資料很多時只畫最近成交的，避免瀏覽器當掉；列表、統計、CSV 仍是全部）
   let sortKey = 'date', sortDir = 'desc', current = [];
 
   document.title = D.title || document.title;
@@ -41,7 +42,8 @@
     ['dateFrom', 'dateTo', 'priceMin', 'priceMax', 'unitMin', 'unitMax', 'areaMin', 'areaMax', 'ageMin', 'ageMax', 'keyword']
       .forEach(k => { $(k).value = f[k] || ''; });
     $('hideSpecial').checked = f.hideSpecial === undefined ? true : !!f.hideSpecial;
-    $('buildingsOnly').checked = !!f.buildingsOnly;
+    // 預設只看有建物的交易：純土地、純車位的「單價」意義不同，混在一起會拉歪單價中位數
+    $('buildingsOnly').checked = f.buildingsOnly === undefined ? true : !!f.buildingsOnly;
   }
 
   // ── 地圖 ───────────────────────────────────────────────
@@ -58,7 +60,7 @@
   function popup(t) {
     return `<b>${esc(t.address || '（無門牌）')}</b><br>${esc(t.date)}・${esc(L_.shortType(t.buildingType))}
       <br>總價 <b>${fmt(t.totalPrice, 1)}</b> 萬・單價 <b>${fmt(t.unitPrice)}</b> 萬/坪
-      <br>建坪 ${fmt(t.area)}・${t.floor != null ? `${t.floor}/${t.totalFloors ?? '—'} 樓・` : ''}屋齡 ${fmt(t.age, 1)} 年
+      <br>建坪 ${fmt(t.area)}・${t.floor != null ? `${esc(t.floor)}/${esc(t.totalFloors ?? '—')} 樓・` : ''}屋齡 ${fmt(t.age, 1)} 年
       ${t.layout ? `<br>${esc(t.layout)}` : ''}${t.parking ? `<br>車位：${esc(t.parking)} ${t.parkingPrice ? fmt(t.parkingPrice, 1) + ' 萬' : ''}` : ''}
       ${t.note ? `<br><span class="note">備註：${esc(t.note)}</span>` : ''}
       ${t.geocoded ? '' : '<br><span class="note">📍 約略位置（行政區中心附近）</span>'}`;
@@ -67,7 +69,10 @@
   function renderMap(list) {
     cluster.clearLayers();
     const bands = L_.priceBands(list);
-    const markers = list.filter(t => t.lat != null).map(t => L.circleMarker([t.lat, t.lng], {
+    const onMap = list.filter(t => t.lat != null);
+    const shown = onMap.length > MAX_MARKERS
+      ? onMap.slice().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)).slice(0, MAX_MARKERS) : onMap;
+    const markers = shown.map(t => L.circleMarker([t.lat, t.lng], {
       radius: 7, weight: t.geocoded ? 1.5 : 1, dashArray: t.geocoded ? null : '2,2', color: '#fff',
       fillColor: COLORS[L_.bandOf(t.unitPrice, bands)], fillOpacity: t.special ? 0.35 : 0.9
     }).bindPopup(popup(t)));
@@ -75,7 +80,10 @@
     $('legend').innerHTML = `單價（萬/坪）：<i style="background:${COLORS[1]}"></i>&lt;${fmt(bands[0])}
       <i style="background:${COLORS[2]}"></i>&lt;${fmt(bands[1])} <i style="background:${COLORS[3]}"></i>&lt;${fmt(bands[2])}
       <i style="background:${COLORS[4]}"></i>≥${fmt(bands[2])}　虛線＝約略位置`;
-    $('offMap').textContent = list.length - markers.length ? `（${list.length - markers.length} 筆沒有座標，只在列表）` : '';
+    const noXY = list.length - onMap.length;
+    $('offMap').textContent = [noXY ? `${noXY} 筆沒有座標，只在列表` : '',
+      onMap.length > MAX_MARKERS ? `符合條件的點太多，地圖只畫最近成交的 ${MAX_MARKERS} 筆（縮小篩選範圍可看到更多；統計與列表是全部）` : '']
+      .filter(Boolean).map(x => `（${x}）`).join('');
   }
 
   // ── 統計與列表 ─────────────────────────────────────────
@@ -111,7 +119,11 @@
     if (pushUrl) history.replaceState(null, '', '#' + L_.toQuery(f));
   }
 
-  document.querySelectorAll('#filters input').forEach(el => el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', () => apply(true)));
+  // 輸入框每打一個字就重算會很卡（資料多時），停 200 毫秒再算；勾選立刻算
+  let timer = null;
+  const later = () => { clearTimeout(timer); timer = setTimeout(() => apply(true), 200); };
+  document.querySelectorAll('#filters input').forEach(el => el.addEventListener(el.type === 'checkbox' ? 'change' : 'input',
+    el.type === 'checkbox' ? () => apply(true) : later));
   $('resetBtn').addEventListener('click', () => { writeFilters({ hideSpecial: true }); apply(true); });
   $('csvBtn').addEventListener('click', () => {
     const a = document.createElement('a');
