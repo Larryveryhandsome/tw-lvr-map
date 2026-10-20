@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>實價登錄地圖｜tw-lvr-map</title>
+<meta name="description" content="把內政部實價登錄開放資料畫成地圖：篩選、統計單價中位數、匯出 CSV。">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous" referrerpolicy="no-referrer">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css" integrity="sha512-mQ77VzAakzdpWdgfL/lM1ksNy89uFgibRQANsNneSTMD/bj0Y/8+94XMwYhnbzx8eki2hrbPpDm0vD0CiT2lcg==" crossorigin="anonymous" referrerpolicy="no-referrer">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css" integrity="sha512-6ZCLMiYwTeli2rVh3XAPxy3YoR5fVxGdH/pz+KMCzRY2M65Emgkw00Yqmhh8qLGeYQ3LbVZGdmOX9KUjSKr0TA==" crossorigin="anonymous" referrerpolicy="no-referrer">
+<style>
+:root{--ink:#1f2a33;--muted:#6a7680;--line:#dde3e8;--bg:#f3f5f7;--main:#2f6286}
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,"Noto Sans TC","Microsoft JhengHei",sans-serif;color:var(--ink);background:var(--bg)}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 16px;background:#fff;border-bottom:1px solid var(--line)}
+header h1{font-size:1.15rem;margin:0}header .muted{font-size:.78rem}.muted{color:var(--muted)}
+.layout{display:grid;grid-template-columns:300px 1fr;min-height:calc(100vh - 60px)}
+#filters{background:#fff;border-right:1px solid var(--line);padding:14px 16px;overflow-y:auto;max-height:calc(100vh - 60px)}
+#filters h3{font-size:.85rem;margin:14px 0 6px;color:var(--main)}#filters input[type=text],#filters input[type=number],#filters input[type=date]{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:.85rem}
+.pair{display:flex;gap:6px;align-items:center}.pair span{color:var(--muted);font-size:.8rem}
+.chip{display:inline-block;margin:2px 4px 2px 0;padding:3px 8px;border:1px solid var(--line);border-radius:99px;font-size:.82rem;cursor:pointer;background:#fafbfc}
+.chip:has(input:checked){background:#e5eef5;border-color:var(--main)}.chip input{margin:0 2px 0 0;vertical-align:-1px}
+.opt{display:block;font-size:.85rem;margin:6px 0}.btn{border:0;border-radius:8px;background:var(--main);color:#fff;padding:8px 12px;font:inherit;font-size:.85rem;cursor:pointer}
+.btn.ghost{background:#fff;color:var(--main);border:1px solid var(--main)}.btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}
+main{padding:12px;overflow:auto}#map{height:56vh;min-height:340px;border-radius:10px;border:1px solid var(--line)}
+#legend{font-size:.8rem;color:var(--muted);margin:6px 2px}#legend i{display:inline-block;width:11px;height:11px;border-radius:50%;margin:0 3px 0 8px;vertical-align:-1px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}.stats div{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center}
+.stats b{display:block;font-size:1.3rem;color:var(--main)}.stats span{font-size:.75rem;color:var(--muted)}
+.panels{display:grid;grid-template-columns:240px 1fr;gap:10px}.card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;overflow:auto}
+table{border-collapse:collapse;width:100%;font-size:.8rem}th,td{padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:left}
+th{position:sticky;top:0;background:#f7f9fa;cursor:pointer;user-select:none}th.asc:after{content:" ▲"}th.desc:after{content:" ▼"}
+tr.special td{color:#a0a8ae}.note{color:#9a5a12;font-size:.8rem}.warn{background:#fff7e6;border:1px solid #f1d39a;color:#6b4d12;border-radius:8px;padding:8px 10px;font-size:.8rem;margin-bottom:10px}
+#toggleFilters{display:none}
+@media(max-width:860px){.layout{grid-template-columns:1fr}#filters{display:none;max-height:none;border-right:0;border-bottom:1px solid var(--line)}
+body.show-filters #filters{display:block}#toggleFilters{display:inline-block}.stats{grid-template-columns:repeat(2,1fr)}.panels{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1 id="title">實價登錄地圖</h1><div class="muted"><span id="source"></span>　<span id="generated"></span></div></div>
+  <div class="btns" style="margin:0"><button class="btn ghost" id="toggleFilters">篩選條件</button><button class="btn ghost" id="shareBtn">複製分享連結</button><button class="btn" id="csvBtn">匯出 CSV</button></div>
+</header>
+<div class="layout">
+  <aside id="filters">
+    <h3>行政區（不選＝全部）</h3><div id="districtBox"></div>
+    <h3>建物型態</h3><div id="typeBox"></div>
+    <h3>交易日期</h3><div class="pair"><input type="date" id="dateFrom"><span>到</span><input type="date" id="dateTo"></div>
+    <h3>總價（萬）</h3><div class="pair"><input type="number" id="priceMin" min="0" placeholder="最低"><span>～</span><input type="number" id="priceMax" min="0" placeholder="最高"></div>
+    <h3>單價（萬/坪）</h3><div class="pair"><input type="number" id="unitMin" min="0" step="0.1"><span>～</span><input type="number" id="unitMax" min="0" step="0.1"></div>
+    <h3>建坪</h3><div class="pair"><input type="number" id="areaMin" min="0"><span>～</span><input type="number" id="areaMax" min="0"></div>
+    <h3>屋齡（年）</h3><div class="pair"><input type="number" id="ageMin" min="0"><span>～</span><input type="number" id="ageMax" min="0"></div>
+    <h3>關鍵字</h3><input type="text" id="keyword" placeholder="路名、社區、備註…">
+    <label class="opt"><input type="checkbox" id="hideSpecial" checked> 排除特殊交易（親友、瑕疵、債權等備註）</label>
+    <label class="opt"><input type="checkbox" id="buildingsOnly"> 只看有建物的交易</label>
+    <div class="btns"><button class="btn ghost" id="resetBtn">清除條件</button></div>
+  </aside>
+  <main>
+    <div class="warn">實價登錄為政府公開資料的整理與視覺化，原則上僅供行情參考；個案價格受樓層、屋況、車位與交易條件影響，不構成估價或投資建議。</div>
+    <div id="map" role="region" aria-label="交易地圖"></div>
+    <div id="legend"></div><div class="muted" id="offMap" style="font-size:.8rem"></div>
+    <div class="stats" id="stats"></div>
+    <div class="panels">
+      <div class="card"><b style="font-size:.85rem">各區單價中位數（萬/坪）</b><table><thead><tr><th>行政區</th><th>筆數</th><th>中位數</th></tr></thead><tbody id="byDistrict"></tbody></table></div>
+      <div class="card"><table><thead><tr id="tableHead"></tr></thead><tbody id="tableBody"></tbody></table><div class="muted" id="tableNote" style="font-size:.8rem"></div></div>
+    </div>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js" integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="data.js"></script>
+<script src="js/lvr.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
