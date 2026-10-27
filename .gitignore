@@ -1,0 +1,7 @@
+node_modules/
+__pycache__/
+data/
+*.csv
+!sample/demo_lvr_land_a.csv
+.DS_Store
+Thumbs.db
